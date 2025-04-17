@@ -2768,3 +2768,10 @@ myenv/Scripts/pip3.10.exe
 myenv/Scripts/pip3.exe
 myenv/Scripts/python.exe
 myenv/Scripts/pythonw.exe
+migrations/alembic.ini
+migrations/env.py
+migrations/README
+migrations/script.py.mako
+migrations/__pycache__/env.cpython-310.pyc
+migrations/versions/6c7236dbeab5_.py
+migrations/versions/__pycache__/6c7236dbeab5_.cpython-310.pyc

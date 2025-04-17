@@ -1,6 +1,9 @@
 from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from flask_marshmallow import Marshmallow
+from flask_migrate import Migrate
+from datetime import datetime
+from datetime import timedelta
 from marshmallow import fields
 from marshmallow import ValidationError
 
@@ -9,6 +12,7 @@ app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:Mp261Vk823!@localhost/e_commerce_db'
 db = SQLAlchemy(app)
 ma = Marshmallow(app)
+migrate = Migrate(app,db)
 
 # Define schemas for databases
 class CustomerSchema(ma.Schema):
@@ -25,9 +29,10 @@ customers_schema = CustomerSchema(many=True)
 class AccountSchema(ma.Schema):
     username = fields.String(required=True)
     password = fields.String(required=True)
+    customer_id = fields.Integer(required=True)
 
     class Meta:
-        fields = ('username','password','user_id')
+        fields = ('username','password','customer_id')
 
 account_schema = AccountSchema()
 accounts_schema = AccountSchema(many=True)
@@ -44,10 +49,15 @@ product_schema = ProductSchema()
 products_schema = ProductSchema(many=True)
 
 class OrderSchema(ma.Schema):
-    date = fields.String(required=True)
+    order_date = fields.Date(required=True)
     user_id = fields.Integer(required=True)
     total_price = fields.Float(required=True)
+    customer_id = fields.Integer(required=True)
+    product_ids = fields.List(fields.Integer, required=True) 
 
+    class Meta:
+        fields = ("date", "user_id", "total_price", "customer_id", "product_ids")
+    
 order_schema = OrderSchema()
 orders_schema = OrderSchema(many=True)
 
@@ -58,25 +68,28 @@ class Customer(db.Model):
     name = db.Column(db.String(255), nullable = False)
     email = db.Column(db.String(320))
     phone = db.Column(db.String(15))
-    orders = db.relationship('Order', backref = 'customer')
 
 class Order(db.Model):
     __tablename__ = 'Orders'
-    id = db.Column(db.Integer, primary_key = True)
-    date = db.Column(db.Date, nullable = False)
-    customer_id = db.Column(db.Integer, db.ForeignKey('Customers.id'))
+    id = db.Column(db.Integer, primary_key=True)
+    order_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    customer_id = db.Column(db.Integer, db.ForeignKey('Customers.id'), nullable=False)
+    customer = db.relationship('Customer', backref='orders')
+    status = db.Column(db.String(50), nullable=False, default="Processing") 
+
+    products = db.relationship('Product', secondary='Order_Product', lazy='subquery', backref=db.backref('orders', lazy=True))
 
 class CustomerAccount(db.Model):
     __tablename__ = 'Customer_Accounts'
     id = db.Column(db.Integer, primary_key = True)
     username = db.Column(db.String(255), unique = True, nullable = False)
     password = db.Column(db.String(255), nullable = False)
-    customer_id = db.Column(db.Integer, db.ForeignKey('Customers.id'))
+    customer_id = db.Column(db.Integer, db.ForeignKey('Customers.id'), nullable=False)
     customer = db.relationship('Customer', backref = 'customer_account', uselist = False)
 
 order_product = db.Table('Order_Product',
-        db.Column('order_id', db.Integer, db.ForeignKey('Orders.id'), primary_key = True),
-        db.Column('product_id', db.Integer, db.ForeignKey('Products.id', primary_key = True))
+    db.Column('order_id', db.Integer, db.ForeignKey('Orders.id'), primary_key=True),
+    db.Column('product_id', db.Integer, db.ForeignKey('Products.id'), primary_key=True)
 )
 
 class Product(db.Model):
@@ -84,7 +97,7 @@ class Product(db.Model):
     id = db.Column(db.Integer, primary_key = True)
     name = db.Column(db.String(255), nullable = False)
     price = db.Column(db.Float, nullable = False)
-    orders = db.relationship('Order', secondary = order_product, backref = db.backref('products'))
+    quantity = db.Column(db.Integer, nullable=False)
 
 @app.route('/')
 def home():
@@ -106,10 +119,10 @@ def add_customers():
     except ValidationError as err:
         return jsonify(err.messages), 400
     
-    new_customer = Customer(id = customer_data['id'], name = customer_data['name'], email = customer_data['email'], phone = customer_data['phone'], orders = customer_data['orders'])
+    new_customer = Customer(name = customer_data['name'], email = customer_data['email'], phone = customer_data['phone'])
     db.session.add(new_customer)
     db.session.commit()
-    return jsonify({"message": "New customer and order added to database!"}), 201
+    return jsonify({"message": "New customer added to database!"}), 201
 
 # update a customer to the database
 @app.route("/customers/<int:id>", methods=["PUT"])
@@ -121,7 +134,8 @@ def update_customers(id):
         return jsonify(err.messages), 400
     
     customer.name = customer_data['name']
-    customer.age = customer_data['age']
+    customer.email = customer_data['email']
+    customer.phone = customer_data['phone']
     db.session.commit()
     return jsonify({"message": "Customer details have updated successfully"}), 200
 
@@ -149,7 +163,7 @@ def add_accounts():
     except ValidationError as err:
         return jsonify(err.messages), 400
     
-    new_account = Customer(username = account_data['username'], password = account_data['password'], customer_id = account_data['customer_id'])
+    new_account = CustomerAccount(username = account_data['username'], password = account_data['password'], customer_id = account_data['customer_id'])
     db.session.add(new_account)
     db.session.commit()
     return jsonify({"message": "New customer account has been added to database!"}), 201
@@ -163,8 +177,9 @@ def update_accounts(id):
     except ValidationError as err:
         return jsonify(err.messages), 400
     
-    account.name = account_data['name']
-    account.age = account_data['age']
+    account.username = account_data['username']
+    account.password = account_data['password']
+    account.customer_id = account_data['customer_id']
     db.session.commit()
     return jsonify({"message": "Customer Account has updated successfully"}), 200
 
@@ -182,9 +197,9 @@ def delete_accounts(id):
 @app.route('/products', methods = ['GET'])
 def get_products():
     products = Product.query.all()
-    return accounts_schema.jsonify(products)
+    return products_schema.jsonify(products)
 
-# create a product in the databas
+# create a product in the database
 @app.route('/products', methods = ['POST'])
 def add_products():
     try:
@@ -192,7 +207,7 @@ def add_products():
     except ValidationError as err:
         return jsonify(err.messages), 400
     
-    new_product = Customer(name = product_data['name'], price = product_data['price'], quantity = product_data['quantity'])
+    new_product = Product(name = product_data['name'], price = product_data['price'], quantity = product_data['quantity'])
     db.session.add(new_product)
     db.session.commit()
     return jsonify({"message": "New product has been added to database!"}), 201
@@ -213,7 +228,8 @@ def update_products(id):
         return jsonify(err.messages), 400
     
     product.name = product_data['name']
-    product.age = product_data['age']
+    product.price = product_data['price']
+    product.quantity = product_data['quantity']
     db.session.commit()
     return jsonify({"message": "Product details have updated successfully"}), 200
 
@@ -232,23 +248,37 @@ def delete_products(id):
 def create_orders():
     try:
         order_data = order_schema.load(request.json)
-        product = Product.query.all()
-        price = 0
-        for item in product:
-            product = Product.query.get(item['id'])
-            price += product.price * item['quantity']
-    except ValidationError as err:
-        return jsonify(err.messages), 400
-    
-    new_order = Customer(date = order_data['date'], customer_id = order_data['customer_id'], price = price)
-    db.session.add(new_order)
-    db.session.commit()
-    return jsonify({"message": "New order added to database!"}), 201
+        new_order = Order(
+            customer_id=order_data['customer_id'],
+            products=[Product.query.get(pid) for pid in order_data['product_ids']]
+        )
+        db.session.add(new_order)
+        db.session.commit()
+        return jsonify({"message": "Order placed successfully!", "order_id": new_order.id}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/orders/<int:id>', methods=['GET'])
 def retrieve_orders(id):
     order = Order.query.get_or_404(id)
-    return order_schema.jsonify(order)
+    return jsonify({
+        "order_id": order.id,
+        "customer_id": order.customer_id,
+        "order_date": order.order_date,
+        "status": order.status,
+        "products": [{"id": p.id, "name": p.name, "price": p.price} for p in order.products]
+    })
+
+@app.route('/orders/<int:id>/track', methods=['GET'])
+def track_order(id):
+    order = Order.query.get_or_404(id)
+    return jsonify({
+        "order_id": order.id,
+        "status": order.status,
+        "order_date": order.order_date,
+        "expected_delivery": (order.order_date + timedelta(days=5)).strftime("%Y-%m-%d")
+    })
 
 with app.app_context():
     db.create_all()
