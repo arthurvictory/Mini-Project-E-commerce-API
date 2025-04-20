@@ -2,6 +2,7 @@ from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from flask_marshmallow import Marshmallow
 from flask_migrate import Migrate
+from flask_cors import CORS
 from datetime import datetime
 from datetime import timedelta
 from marshmallow import fields
@@ -13,6 +14,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:Mp261Vk823!
 db = SQLAlchemy(app)
 ma = Marshmallow(app)
 migrate = Migrate(app,db)
+CORS(app)
 
 # Define schemas for databases
 class CustomerSchema(ma.Schema):
@@ -56,7 +58,7 @@ class OrderSchema(ma.Schema):
     product_ids = fields.List(fields.Integer, required=True) 
 
     class Meta:
-        fields = ("date", "user_id", "total_price", "customer_id", "product_ids")
+        fields = ("order_date", "user_id", "total_price", "customer_id", "product_ids")
     
 order_schema = OrderSchema()
 orders_schema = OrderSchema(many=True)
@@ -110,6 +112,12 @@ def home():
 def get_customers():
     customers = Customer.query.all()
     return customers_schema.jsonify(customers)
+
+# get a specific customer
+@app.route("/customers/<int:id>", methods=["GET"])
+def get_customer(id):
+    customer = Customer.query.get_or_404(id)
+    return customer_schema.jsonify(customer)
 
 # add a customer to the database
 @app.route('/customers', methods = ['POST'])
@@ -279,6 +287,13 @@ def track_order(id):
         "order_date": order.order_date,
         "expected_delivery": (order.order_date + timedelta(days=5)).strftime("%Y-%m-%d")
     })
+
+@app.route("/orders/<int:id>", methods=["DELETE"])
+def delete_order(id):
+    order = Order.query.get_or_404(id)
+    db.session.delete(order)
+    db.session.commit()
+    return jsonify({"message": "Order has been deleted successfully"}), 200
 
 with app.app_context():
     db.create_all()

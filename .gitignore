@@ -2775,3 +2775,5 @@ migrations/script.py.mako
 migrations/__pycache__/env.cpython-310.pyc
 migrations/versions/6c7236dbeab5_.py
 migrations/versions/__pycache__/6c7236dbeab5_.cpython-310.pyc
+migrations/versions/28f2bca40941_.py
+migrations/versions/__pycache__/28f2bca40941_.cpython-310.pyc
